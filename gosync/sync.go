@@ -140,13 +140,17 @@ func (s *SyncPair) syncS3ToDir() bool {
 	}
 	targetFiles := loadLocalFiles(s.Target)
 
-	var routines []chan string
+	//var routines []chan string
 
 	s3url := S3Url{Url: s.Source}
 	bucket, err := lookupBucket(s3url.Bucket(), s.Auth)
 	if err != nil {
 		return false
 	}
+
+	// set our pool using a buffered channel and a waitgroup
+	var wg sync.WaitGroup
+	pool := pooldigger(s.Concurrent)
 
 	count := 0
 
@@ -163,17 +167,35 @@ func (s *SyncPair) syncS3ToDir() bool {
 			}
 
 			wait := make(chan string)
-			go getRoutine(wait, filePath, bucket, file)
-			routines = append(routines, wait)
+
+			// here we use a blocking chan to make sure we have access to a writer - it will block until we have access to one
+			<-pool
+			fmt.Printf("Woohoo! I found a getter! \n")
+			wg.Add(1)
+
+			go func() {
+
+				defer wg.Done()
+				fmt.Printf("running.. \n")
+				getRoutine(wait, filePath, bucket, file)
+				pool <- 1
+				fmt.Printf("finished.. \n")
+
+			}()
+			//routines = append(routines, wait)
 		}
-		if count > s.Concurrent {
+		/*if count > s.Concurrent {
 			fmt.Printf("Maxiumum concurrent threads running. Waiting.\n")
 			waitForRoutines(routines)
 			count = 0
 			routines = routines[0:0]
-		}
+		}*/
 	}
-	waitForRoutines(routines)
+
+	// wait for it all to finish
+	fmt.Printf("waiting.. \n")
+	wg.Wait()
+	//waitForRoutines(routines)
 	return true
 }
 
